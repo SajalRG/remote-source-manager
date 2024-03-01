@@ -1,0 +1,120 @@
+#!/bin/python3
+
+'''
+This script can be used to sync code from server locally.
+It is useful to open code in editors like AndroidStudio and development can continue regardless of internet connectivity.
+'''
+
+import subprocess
+import json
+import argparse
+import sys
+
+# JSON configurations
+# Please specify your combination like below.
+# Note: end of the path should contain a slash '/'
+#       remote_address should have both username and ip address or alias if set
+# Check appendix for example
+# ~~~~~~~~~~~~~~~~~~ UPDATE HERE ~~~~~~~~~~~~~~~
+configurations = []
+# ~~~~~~~~~~~~~~~~~~ UPDATE HERE ~~~~~~~~~~~~~~~
+
+def bash_cmd(cmd, shell=False):
+    try:
+        # Execute the rsync command
+        subprocess.run(cmd, shell=shell, check=True)
+        print(f'cmd executed successfully.')
+    except subprocess.CalledProcessError as e:
+        print(f'shellCommand {cmd} failed with error: {e}')
+
+def rsync(source_path, destination_path, remote_address, upload, dry_run):
+    direction = 'upload' if upload else 'download'
+    # Determine the rsync direction
+    remote_path = f'{remote_address}:{source_path}'
+    local_path = destination_path
+
+    # setup source and destination
+    source_path = local_path if upload else remote_path
+    destination_path = remote_path if upload else local_path
+
+    possible_dry_run = ('--dry-run',) if dry_run else ()
+    # Create the rsync command with customizable options
+    rsync_cmd = [
+    'rsync',
+    '-avLhP' if upload else '-avLhPz',
+    *possible_dry_run,
+    '--exclude', '.git*',  # Exclude files and directories starting with dot (.)
+    '--exclude', 'build/*',  # Exclude files and directories starting with dot (.)
+    source_path,
+    destination_path
+    ]
+
+    print(f'rsync {direction} command executed.')
+    bash_cmd(rsync_cmd)
+
+def select_combination(configurations):
+    print("Select a combination:")
+    for idx, config in enumerate(configurations):
+        print(f"{idx+1}. {config['name']}")
+    choice = input("Enter the shortcode: ")
+    return configurations[int(choice) - 1]
+
+def download_binary(config, dry_run):
+    output_file_remote_path = config["output_file_remote_path"]
+    output_file_cmd = config["output_file_cmd"]
+    if output_file_remote_path == None:
+        print("Please specify the output file path")
+        sys.exit(1)
+    rsync(output_file_remote_path, "/home/mobaxterm/tmp/binaries/", config["remote_address"], False, dry_run)
+    if not dry_run and output_file_cmd != None:
+        bash_cmd(output_file_cmd, True)
+
+def git_sync(config):
+    destination_path = config["destination_path"]
+    if destination_path == None:
+        print("Please specify the destination path")
+        sys.exit(1)
+    git_pull_cmd = "cd " + destination_path  + " && git clean -fd && git reset --hard HEAD^ && git pull origin"
+    bash_cmd(git_pull_cmd, True)
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Rsync source code from server.')
+parser.add_argument('-v', '--version', action='version', version='Script Vesion - 0.2 March 1, 2024')
+parser.add_argument('-d', '--direction', choices=['up','down','bin', 'sync'], help='Upload/Download files from the server', required=True)
+parser.add_argument('-t', '--test_run', action='store_true', default=False, help='Dry/Test run to check which files will be copied')
+#parser.add_argument('-u', '--upload', action='store_true', help='Upload files to the server')
+args = parser.parse_args()
+
+# Select a combination of options
+selected_config = select_combination(configurations)
+dry_run = args.test_run
+
+if args.direction == 'bin':
+    download_binary(selected_config, dry_run)
+elif args.direction == 'sync':
+    git_sync(selected_config)
+else:
+    upload = args.direction == 'up'
+    # Execute the rsync command
+    rsync(selected_config['source_path'], selected_config['destination_path'], selected_config['remote_address'], upload, dry_run)
+
+# APPENDIX - example configuration
+'''
+configurations = [
+{
+    "name": "SystemUi",
+    "source_path": "<server-path">,
+    "destination_path": "<local-path>",
+    "remote_address": "user@ip",
+    "output_file_remote_path": "apk path",
+    "output_file_cmd": "adb root && sleep 1 && adb remount && sleep 1 && adb push <path to apk> <device path>"},
+{
+    "name": "Launcher",
+    "source_path": "<server-path">,
+    "destination_path": "<local-path>",
+    "remote_address": "user@ip",
+    "output_file_remote_path": "apk path",
+    "output_file_cmd": "adb install <path to apk>"
+}
+]
+'''
